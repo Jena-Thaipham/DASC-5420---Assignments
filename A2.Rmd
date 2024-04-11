@@ -1,0 +1,1068 @@
+---
+title: "DASC 5420 - Assignment 2"
+author: "Thai Pham - T00727094"
+date: "`r Sys.Date()`"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+# install and call required library
+pkg_list = c("dplyr","tidyverse","ISLR","ISLR2", "caret","ModelMetrics","corrplot", 'ggpubr', 'glmnet',
+'GGally', 'class', 'boot', 'pROC')
+# Install packages if needed
+for (pkg in pkg_list)
+{# Try loading the library.
+if ( ! library(pkg, logical.return=TRUE, character.only=TRUE) )
+{
+# If the library cannot be loaded, install it; then load.
+install.packages(pkg)
+library(pkg, character.only=TRUE)
+}
+}
+```
+
+# Question 1: German Credit Risk
+
+## a) Write the goal of this data analysis. Do some exploratory data analysis (EDA) and data transformations.
+
+The objective of this analysis is to develop a logistic classifier to predict applicants' creditability, determining whether they are likely to repay a loan based on their attributes and credit history. To achieve this goal, a logistic classifier will be trained using a comprehensive set of 20 predictors, including variables such as Account Balance, Payment Status of Previous Credit, Value Savings/Stocks, Instalment Percentage, and Guarantors, among others. These predictors will serve as features for the model, helping to identify patterns and relationships that can accurately classify individuals into categories of creditability (e.g., "good" or "bad" credit risk).
+
+By leveraging this logistic classifier, financial institutions can streamline their lending processes, mitigate potential losses, and optimize their overall risk management strategies.
+
+EXPLORATORY DATA ANALYSIS (EDA)
+
+```{r}
+#Load the data
+data<-read.csv("german_credit.csv")
+glimpse(data)
+```
+
+```{r}
+# Statistic summary
+summary(data)
+# Check for missing values
+sum(is.na(data))
+```
+
+The dataset consists of 1000 numeric observations with 21 columns. Each row represents a customer sample, and each column represents an attribute of that sample. Since this dataset does not have missing value, no missing values imputation is required in this data transformation step.
+
+```{r}
+# Histogram plot for a numerical variable (e.g., Creditability)
+hist(data$Creditability, main = "Histogram of Creditability", xlab = "Creditability",col="blue")
+
+# Calculate correlation matrix
+correlation_matrix <- cor(data)
+correlation_matrix
+
+# Plot heatmap for correlation matrix
+corrplot(correlation_matrix, method = "color", type = "upper", 
+         addrect = 3, order = "hclust", tl.cex = 0.8, tl.col = "black")
+```
+
+The histogram depicting creditability reveals a slight imbalance, with approximately 300 instances classified as 0 and 700 instances as 1. The dataset highlights moderate positive correlations between creditability and various factors such as account balance, credit amount, duration of credit (in months), and payment status of previous credit, as well as the number of credits at this bank. Conversely, there exists a moderate negative correlation between installment percent and credit amount. These findings suggest that customers exhibiting higher account balances, credit amounts, longer credit durations, and positive payment histories are more likely to demonstrate good creditability. Conversely, individuals with higher installment percentages relative to their credit amount may have lower creditworthiness.
+
+```{r}
+# Select important variables
+important_vars <- c("Account.Balance", "Credit.Amount", 
+                    "Payment.Status.of.Previous.Credit", "Instalment.per.cent")
+
+# Create a list to store individual boxplot plots
+plots <- list()
+
+# Loop through each important variable and create boxplot plots
+for (var in important_vars) {
+  plot <- ggplot(data, aes_string(y = var)) +
+    geom_boxplot(fill = "skyblue", color = "red") +
+    labs(title = paste(var),
+         y = "") +  # Remove y-axis label
+    theme_minimal() +
+    theme(axis.text.x = element_blank(),  # Remove x-axis labels
+          axis.title.x = element_blank(), # Remove x-axis title
+          axis.title.y = element_blank()) # Remove y-axis title
+  
+  plots[[var]] <- plot
+}
+
+# Arrange the plots into a grid
+ggarrange(plotlist = plots, ncol = 2, nrow = 2)
+
+```
+
+The boxplots illustrate that the majority of predictors exhibit no outliers, except for the "Credit Amount" variable, which displays the presence of outliers. Hence, it is advisable to eliminate outliers in the "Credit Amount" variable before constructing machine learning models. This preprocessing step is crucial as it can enhance the accuracy and performance of the models.
+
+DATA TRANSFORMATION
+
+```{r}
+# Remove outliers of feature Credit.Amount
+z_scores <- abs(scale(data$Credit.Amount))
+data <- data[z_scores < 3, ]
+
+# Standardize Credit.Amount
+data$Credit.Amount <- scale(data$Credit.Amount)
+credit<-data
+```
+
+After applying the outlier removal technique using the z-scored method and standardizing the "Credit.Amount" variable, we have created a new dataset named "credit." Removing outliers helps cleanse the data by eliminating potential data points that may skew the distribution and affect analytical outcomes. Subsequently, standardizing the "Credit.Amount" variable scales all values to the same proportion, reducing the influence of measurement units. This makes the data easier to compare and analyze.
+
+Lastly, reintegrating the cleaned and standardized dataset back under the name "credit" facilitates further analysis and model building. This allows for seamless utilization of the dataset for subsequent analyses, such as credit risk prediction based on other variables.
+
+## b) Build a classifier to predict the creditability of a consumer using logistic regression
+
+```{r}
+# Split the dataset into training and testing sets (80% train, 20% test)
+set.seed(5420) 
+trainIdx <- createDataPartition(credit$Creditability, p = 0.8, list = FALSE,times = 1)
+
+# Create training and testing sets
+credit.train <- credit[trainIdx, ]
+credit.test <- credit[-trainIdx, ]
+
+# Train logistic regression model
+full_model <- glm(Creditability ~ ., data = credit.train, family = binomial)
+summary(full_model)
+
+```
+
+This is a summary of the full model that utilizes all predictors. However, given that some predictors lack statistical significance, I intend to construct an alternative model employing only those variables deemed statistically significant in this analysis.
+
+```{r}
+# Fit a logistic regression model with selected variables
+new_model <- glm(Creditability ~ Account.Balance + Duration.of.Credit..month. + Payment.Status.of.Previous.Credit + Value.Savings.Stocks + Length.of.current.employment + Instalment.per.cent + Sex...Marital.Status + Concurrent.Credits + Type.of.apartment + Foreign.Worker, data = credit.train, family = binomial)
+
+# Summary of the model
+summary(new_model)
+
+```
+
+This presents the summary of the model utilizing solely the statistically significant variables extracted from the comprehensive model.
+
+## c) Print out the algorithm performance and interpret the results
+
+```{r}
+# Make predictions on the test set for full_model
+predictions_full <- predict(full_model, credit.test,type = "response")
+
+# Convert predictions to binary values
+predictions_full <- ifelse(predictions_full > 0.5, 1, 0)
+
+# Evaluate the model using confusion matrix
+conf_matrix_full <- table(Predicted = predictions_full, Actual = credit.test$Creditability)
+conf_matrix_full
+
+# Calculate ROC curve
+roc_full <- roc(credit.test$Creditability, predictions_full)
+
+# Calculate AUC-ROC
+auc_full <- auc(roc_full)
+cat("AUC-ROC for Full Model:", auc_full)
+```
+
+```{r}
+# Extract values from the confusion matrix
+TP <- 108  # True Positives
+TN <- 26   # True Negatives
+FP <- 18   # False Positives
+FN <- 35   # False Negatives
+
+# Calculate metrics
+accuracy <- (TP + TN) / sum(TP, TN, FP, FN)
+precision <- TP / (TP + FP)
+recall <- TP / (TP + FN)
+specificity <- TN / (TN + FP)
+f1_score <- 2 * precision * recall / (precision + recall)
+
+# Print the results
+cat("Accuracy:", accuracy, "\n")
+cat("Precision:", precision, "\n")
+cat("Recall (Sensitivity):", recall, "\n")
+cat("Specificity:", specificity, "\n")
+cat("F1-score:", f1_score, "\n")
+
+```
+
+```{r}
+# Make predictions on the test set for new_model
+predictions_new <- predict(new_model, newdata = credit.test,type = "response")
+
+# Convert predictions to binary values
+predictions_new <- ifelse(predictions_new > 0.5, 1, 0)
+
+# Evaluate the model using confusion matrix
+conf_matrix_new <- table(Predicted = predictions_new, Actual = credit.test$Creditability)
+conf_matrix_new
+
+# Calculate ROC curve
+roc_new <- roc(credit.test$Creditability, predictions_new)
+
+# Calculate AUC-ROC
+auc_new <- auc(roc_new)
+cat("AUC-ROC for New Model:", auc_new)
+```
+
+```{r}
+# Extract values from the confusion matrix
+TP <- 106  # True Positives
+TN <- 25   # True Negatives
+FP <- 20   # False Positives
+FN <- 36   # False Negatives
+
+# Calculate metrics
+accuracy <- (TP + TN) / sum(TP, TN, FP, FN)
+precision <- TP / (TP + FP)
+recall <- TP / (TP + FN)
+specificity <- TN / (TN + FP)
+f1_score <- 2 * precision * recall / (precision + recall)
+
+# Print the results
+cat("Accuracy:", accuracy, "\n")
+cat("Precision:", precision, "\n")
+cat("Recall (Sensitivity):", recall, "\n")
+cat("Specificity:", specificity, "\n")
+cat("F1-score:", f1_score, "\n")
+```
+
+The full logistic regression model, trained on the complete set of predictors, exhibits superior predictive performance compared to the new model with manually selected predictors. When applied to our credit dataset, the full model achieves an accuracy of 71.7%, precision of 85.7%, recall (sensitivity) of 75.5%, specificity of 59.1%, and F1-score of 0.803. Additionally, its AUC-ROC value is approximately 0.642.
+
+On the other hand, the new model, which includes only manually chosen predictors, achieves an accuracy of 70.1%, precision of 84.1%, recall of 74.6%, specificity of 55.6%, and F1-score of 0.791. Its AUC-ROC value is approximately 0.626.
+
+In summary, the full logistic regression model demonstrated slightly better predictive performance compared to the new model, achieving higher accuracy, precision, recall, specificity, and F1-score. This suggests that including all available predictors in the model may provide more information for accurate classification compared to using a subset of manually selected predictors.
+
+## d) Iterate and improve your algorithm performance.
+
+USING K-FOLD CROSS-VALIDATION
+
+```{r}
+# k-fold CV function
+k.fold.cv <- function(data = credit.train, k = 10) {
+  set.seed(5420)
+  mydata <- data[sample(nrow(data)), ]
+  # create k-fold
+  folds <- cut(seq(1, nrow(mydata)), breaks = k, labels = FALSE)
+  # initialize metric vector
+  pred.error <- NULL
+  # loop over each fold
+  for (i in 1:k) {
+    # segment data
+    testIdx <- which(folds == i, arr.ind = TRUE)
+    # split train-test
+    test.data <- data[testIdx, ]
+    train.data <- data[-testIdx, ]
+    # fit the model
+    lr.model <- glm(Creditability ~ ., data = train.data, family = binomial)
+    # make predictions on the test set
+    predictions <- predict(lr.model, newdata = test.data, type = "response")
+    # convert predictions to binary values
+    predictions <- ifelse(predictions > 0.5, 1, 0)
+    # accuracy
+    pred.error[i] <- mean(predictions == test.data$Creditability)
+  }
+  # return the average accuracy across all folds
+  return(mean(pred.error))
+}
+
+# Apply k-fold cross-validation
+k.fold.cv()
+
+```
+
+The 10-fold cross-validation demonstrates an improved overall accuracy of 74.1% for the binary classification model compared to the previous model's accuracy of 71.7% without cross-validation. This indicates the enhanced predictive capability of the cross-validated model in distinguishing between the two classes. By implementing cross-validation, we mitigate overfitting issues and obtain a more robust estimation of the model's performance on unseen data.
+
+USING LOOCV METHOD
+
+```{r}
+loocv <- function(data=credit.train){
+k = length(data[,])
+set.seed(5420)
+mydata = data[sample(nrow(data)),]
+# create k-fold
+folds <- cut(seq(1, nrow(mydata)), breaks = k, labels = F)
+table(folds)
+# initialize metric vector
+pred.error <- NULL
+# loop over each fold
+for (i in 1:k){
+# segment data
+testIdx <- which(folds == i, arr.ind = T)
+# split train-test
+test.data <- data[testIdx,]
+train.data <- data[-testIdx,]
+# fit the model
+lr.model <- glm(Creditability ~ ., data = train.data, family = binomial)
+# make predictions on the test set
+predictions <- predict(lr.model, newdata = test.data, type = "response")
+# convert predictions to binary values
+predictions <- ifelse(predictions > 0.5, 1, 0)
+# accuracy
+pred.error[i] <- mean(predictions == test.data$Creditability)
+}
+# return the average accuracy across all folds
+return(mean(pred.error))
+}
+loocv()
+```
+
+The result of 0.7674981 represents the estimated accuracy achieved through Leave-One-Out Cross-Validation (LOOCV). This value indicates that the model, when trained on all but one data point and tested on the omitted point iteratively, achieves an accuracy of approximately 76.75%.
+
+In the context of customers, this high accuracy suggests that the model is adept at predicting credit risk for individual customers with a relatively low error rate. This means that the model can effectively differentiate between customers who are likely to be creditworthy and those who pose a higher risk of defaulting on loans or credit obligations. As a result, financial institutions can use this model to make more informed decisions when evaluating customers' creditworthiness, leading to better risk management and potentially reducing the likelihood of financial losses due to defaults.
+
+## (e) Compare the results in (d) with the results obtained using the cross-validation function in R in caret or boot package.
+
+```{r}
+credit.train.m <- credit.train
+credit.train.m$Creditability[credit.train.m$Creditability == 0] <- "bad"
+credit.train.m$Creditability[credit.train.m$Creditability == 1] <- "good"
+train_control <- trainControl(method = "cv", number = 10, savePredictions="all", classProbs=TRUE)
+log_reg_model <- train(Creditability ~ ., data = credit.train.m, method = "glm",
+trControl = train_control, family = "binomial")
+
+# print information about model
+print(log_reg_model)
+
+```
+
+The logistic regression model trained with 10-fold cross-validation using the caret package achieved an accuracy of approximately 78.86% and a kappa coefficient of about 0.415. Compared to the self-implemented 10-fold cross-validation (74.1% accuracy) and LOOCV (76.75% accuracy), the caret package's approach demonstrated the highest accuracy. This suggests that utilizing caret's built-in cross-validation method may offer a more robust and efficient means of estimating model performance.
+
+# Question 2: Red Wine Quality
+
+## a) Write the goal of this data analysis. Do some exploratory data analysis (EDA) and data transformations.
+
+The objective of applying the K-Nearest Neighbors (KNN) algorithm to the Red Wine Quality dataset is to develop a classification model for predicting the quality of wine using its chemical attributes. This dataset comprises 11 input features pertaining to various chemical properties of wines, including fixed acidity, volatile acidity, citric acid, residual sugar, chlorides, free sulfur dioxide, total sulfur dioxide, density, pH, sulphates, and alcohol content. Additionally, it includes a target variable representing the quality of the wine. By leveraging the KNN algorithm on this dataset, we aim to predict the quality of a new wine based on its chemical characteristics. This predictive model could offer valuable insights for quality assurance and control within the wine industry.
+
+EXPLORATORY DATA ANALYSIS (EDA)
+
+```{r cache=TRUE}
+wine<-read.csv("winequality-red.csv",sep = ";")
+glimpse(wine)
+
+# Check for missing values
+sum(is.na(wine))
+```
+
+The dataset consists of 1599 numeric observations with 12 columns. Since this dataset does not have missing value, no missing values imputation is required in this data transformation step.
+
+```{r cache=TRUE}
+# Statistic summary
+summary(wine)
+
+```
+
+This is statistical summary of 12 numeric variables in the dataset. Each numeric variable is summarized in min, first quantile, median, mean, third quantile, and max values.
+
+```{r cache=TRUE}
+# Histogram of Quality
+hist(wine$quality, main = "Histogram of Wine Quality", xlab = "Quality")
+```
+
+The wine quality is categorized into six classes: 3, 4, 5, 6, 7, and 8. However, the distribution of observations among these classes is highly imbalanced. The majority of observations belong to classes 5 and 6, while classes 3, 4, and 8 contain only a few data points.
+
+```{r cache=TRUE}
+# Display boxplots of the variables
+par(mfrow=c(3,2))
+boxplot(wine$fixed.acidity, main="Fixed Acidity")
+boxplot(wine$volatile.acidity, main="Volatile Acidity")
+boxplot(wine$citric.acid, main="Citric Acid")
+boxplot(wine$residual.sugar, main="Residual Sugar")
+boxplot(wine$total.sulfur.dioxide, main="Total sulfur dioxide")
+boxplot(wine$alcohol, main="Alcohol")
+```
+
+Boxplots indicate the existence of outliers in multiple variables. Hence, it is advisable to eliminate them before constructing machine learning models to enhance the accuracy and efficacy of the model.
+
+```{r cache=TRUE}
+# Check correlation between numeric variables
+corrplot(cor(wine), method = "circle", order = "hclust", tl.srt = 45)
+```
+
+Significant positive correlations exist between density and fixed acidity, fixed acidity and citric acid, and total sulfur dioxide and free sulfur dioxide. Conversely, notable negative correlations are observed between density and alcohol, pH and fixed acidity, pH and citric acid, as well as volatile acidity and citric acid.
+
+DATA TRANSFORMATION
+
+```{r cache=TRUE}
+# Remove outliers points which lies outside the 3 standard deviation zones
+z_scores <- apply(wine, 2, function(x) abs(scale(x)))
+wine <- wine[rowSums(z_scores < 3) == ncol(z_scores),]
+
+# Standardize predictor variables using the scale() function
+wine[, 1:11] <- apply(wine[, 1:11], 2, scale)
+```
+
+The purpose of removing outliers using z-scores and standardizing the wine data is to enhance the robustness and reliability of machine learning models built on this dataset. Outliers can disproportionately influence statistical analyses and predictive models, potentially leading to biased results and reduced model performance. By removing outliers and standardizing the data, we aim to mitigate the impact of extreme values and ensure that the model's predictions are based on the most representative and reliable information. This preprocessing step helps improve the accuracy and effectiveness of the subsequent machine learning algorithms applied to the wine dataset.
+
+## (b) Build a KNN (K-Nearest Neighbour) classifier to predict red wine quality
+
+```{r cache=TRUE}
+# Split the data into training and testing sets
+set.seed(5420)
+training.samples <- wine$quality %>% createDataPartition(p = 0.8, list = FALSE)
+train.data <- wine[training.samples, 1:11]
+train.class <- wine[training.samples, 12]
+test.data <- wine[-training.samples, 1:11]
+test.class <- wine[-training.samples, 12]
+
+# Build KNN classifier
+k <- 5
+wine.knn <- knn(train.data, test.data, train.class, k)
+```
+
+Evaluate performance of the KNN classifier
+
+```{r cache=TRUE}
+# Overall accuracy
+OA<-mean(wine.knn == test.class)
+
+# Print results
+cat("Overall accuracy:", OA, "\n")
+
+# Confusion matrix
+print("Confusion matrix:")
+table(Prediction = wine.knn, Actual = test.class)
+
+```
+
+The confusion matrix presents an overview of the KNN classification model's performance on a test dataset. It highlights the correct classifications along the diagonal and misclassifications in off-diagonal elements. The overall accuracy of the model stands at around 60.2%. Notably, the KNN classifier performed well in accurately predicting quality classes 5 and 6 but struggled with quality groups 4 and 8.
+
+To enhance model performance, a potential strategy involves consolidating adjacent quality ratings into broader categories like "low," "medium," and "high" quality. This entails merging similar quality ratings to simplify the classification process and potentially improve predictive accuracy.
+
+```{r cache=TRUE}
+# Reduce the categories of the outcome
+wine$quality <- factor(ifelse(wine$quality < 6, "Low",
+                             ifelse(wine$quality > 6, "High", "Medium")),
+                       levels = c("Low", "Medium", "High"))
+
+# Split the data into training and testing sets
+set.seed(5420)
+training.samples <- wine$quality %>% createDataPartition(p = 0.8, list = FALSE)
+train.data <- wine[training.samples, 1:11]
+train.class <- wine[training.samples, 12]
+test.data <- wine[-training.samples, 1:11]
+test.class <- wine[-training.samples, 12]
+
+# Build KNN classifier
+k <-5 
+new_wine.knn <- knn(train.data, test.data, train.class, k)
+```
+
+Evaluate performance of the KNN classifier after reducing the categories of the outcome
+
+```{r cache=TRUE}
+# Overall accuracy
+new_OA<-mean(new_wine.knn == test.class)
+
+# Print results
+cat("Overall accuracy:", new_OA, "\n")
+
+# Confusion matrix
+print("Confusion matrix:")
+table(Prediction = new_wine.knn, Actual = test.class)
+```
+
+The presented confusion matrix illustrates the performance evaluation of a KNN classification model applied to a test dataset, which was refined to encompass only three categories representing wine quality. The diagonal entries of the matrix depict the count of accurately classified instances, while the off-diagonal entries represent misclassifications. Following the refinement, the new model demonstrates an enhanced overall prediction accuracy, which now stands at 64%.
+
+## (c) Apply cross-validation
+
+```{r}
+wine.cv = train(x = train.data,
+y = train.class,
+method = "knn",
+tuneGrid = data.frame(k = c(1:12)),
+trControl = trainControl(method = "repeatedcv",
+number = 5,
+repeats = 3)
+)
+# Print cross-validation result
+wine.cv
+
+```
+
+This summary presents the evaluation results of a KNN classification model trained on a dataset with 11 predictors and 3 classes (Low, Medium, High). The model was trained using repeated 3 times 5-fold cross-validation to determine the optimal value of k. The evaluation metrics used were accuracy and kappa. The optimal value of k was found to be 1, which resulted in an accuracy of 64%.
+
+```{r}
+plot(wine.cv)
+```
+
+According to the cross-validation plot aimed at identifying the optimal k value on the training data, the accuracy metric was employed to identify the model with the highest accuracy. Subsequently, k = 1 was determined as the optimal choice for the model. The selected model attained an accuracy of around 65%.
+
+## d) Evaluate the model performance
+
+```{r}
+# Use model to predict classes for the test set.
+pred_class = predict(wine.cv, test.data)
+
+# Overall accuracy
+pred_OA<-mean(pred_class == test.class)
+cat("Overall predicted accuracy:", pred_OA, "\n")
+
+# Confusion matrix
+table(Prediction = pred_class, Actual = test.class)
+
+```
+
+The provided confusion matrix encapsulates the performance of a KNN classification model on a test dataset. Its diagonal entries represent the count of accurately classified samples, while off-diagonal entries denote misclassifications. The model exhibits an overall accuracy of roughly 67.1%, accurately labeling 200 out of 289 observations. Utilizing the confusion matrix allows for the computation of diverse metrics, offering comprehensive insights into the model's performance across individual classes.
+
+## e) Interpret the result
+
+From the analysis of the three KNN models developed for predicting wine quality classes based on chemical properties, it is evident that the third model, employing repeated 3 times 5-fold cross-validation for optimization, attains the highest overall accuracy of 67.1% on the test dataset. Moreover, notable performance improvement is observed in the second model, where the target classes are consolidated into three categories, compared to the first model encompassing all quality classes separately. This underscores the effectiveness of reducing the number of target classes in enhancing model accuracy. In conclusion, the recommendation leans towards adopting the third model, which utilizes three target classes and is optimized through cross-validation, for the precise prediction of wine quality using chemical attributes.
+
+# Question 3: Wrong Cross-Validation
+
+The cross-validation method described in the question is flawed due to the feature selection process being applied to the entire dataset, including both the training and test sets. This leads to information leakage from the test set into the training set, resulting in overfitting and overly optimistic cross-validation outcomes. To address this issue, it is advisable to split the data into training and test sets first, followed by performing feature selection independently within each fold of the cross-validation. The recommended steps are as follows:
+
+-   Randomly partition the dataset into training and test sets, allocating, for instance, 80% of the data for training and 20% for testing.
+
+-   Conduct feature selection separately for each fold of cross-validation, utilizing solely the training data within that fold.
+
+-   Train the logistic regression model on the selected features using the training data within each fold and utilize it to predict the class labels of the test data within that fold.
+
+-   Repeat steps 2-3 for all folds of the cross-validation.
+
+-   Compute the average cross-validation error rate across the five folds.
+
+This approach ensures that the feature selection process is solely performed on the training set within each fold, preventing any information leakage from the test set. Consequently, the resulting cross-validation error rate should offer a more accurate estimate of the classifier's true error rate.
+
+SIMULATION TO ILLUSTRAE WRONG CROSS-VALIDATION
+
+```{r}
+set.seed(5420)
+# Set the number of samples and inputs
+N <- 50
+p <- 3000
+
+# Generate simulated predictors
+X <- matrix(rnorm(N * p), nrow = N)
+
+# Name 3000 predictors
+colnames(X) <- paste0("X", 1:3000)
+
+# Generate the class labels with equal size
+y <- c(rep(1, N/2), rep(0, N/2))
+
+# Shuffle the data
+idx <- sample(N)
+X <- X[idx, ]
+y <- y[idx]
+
+```
+
+```{r}
+# Create function to return top variables has high correlation with response class
+find_top_correlated <- function(data, y, n_vars) {
+# Compute correlations between each predictor and response
+corrs <- cor(data, y)
+abs_corrs <- abs(corrs)
+# Sort the absolute correlations
+sorted_corrs <- sort(abs_corrs, decreasing = TRUE)
+# Get indices of the top correlated predictors
+top_idx <- order(abs_corrs, decreasing = TRUE)[1:n_vars]
+# Return the top correlated predictors
+return(data[, top_idx])
+}
+
+# Get top correlations variables
+top_vars <- find_top_correlated(X, y, 100)
+
+# Combine response and predictors in a dataframe
+data_top_df <- as.data.frame(cbind(y, top_vars))
+
+# Convert response to factor
+data_top_df$y <- as.factor(ifelse(data_top_df$y == 0, "bad", "good"))
+
+# 5 folds cross-validation
+train_control <- trainControl(method = "cv", number = 5, savePredictions="all", classProbs=TRUE)
+s.model <- train(y ~ ., data = data_top_df, method = "glm",
+trControl = train_control, family = "binomial")
+
+
+# Print result
+print(s.model)
+```
+
+The simulated data consisted of two classes with equal sample sizes, each having 50 samples. The dataset comprised 3000 quantitative inputs generated from a standard normal distribution, which were assumed to be independent of the class labels.
+
+Subsequently, 100 inputs with the largest absolute correlations with the class labels across all samples were selected. However, this feature selection step was performed on the entire dataset, including both the training and test sets, which violates the principle of proper cross-validation.
+
+After selecting these inputs, a logistic regression classifier was trained using only these selected features. The model was then evaluated using 5-fold cross-validation to estimate the unknown tuning parameters and prediction error.
+
+However, average of classification prediction error of 5 fold cross-validation is still very low, at 30%. This is probably due to the fact that all simulated predictors are independent of the target class labels. This discrepancy highlights the flawed approach of leaking information from the test set into the training set during feature selection, leading to overfitting and overly optimistic cross-validation results.
+
+# Question 4: Bootstrap on simulated data
+
+GENERATE SIMULATED DATA AND PERFORM BOOTSTRAP
+
+```{r}
+# set the random seed for reproducibility
+set.seed(5420)
+# generate Z1 and Z2 using standard normal distribution
+Z1 <- rnorm(100)
+Z2 <- rnorm(100)
+# generate X, Y from Z1 and Z2
+X <- Z1
+rho <- 0.4
+Y <- rho*Z1 + (1-rho^2)*Z2
+```
+
+```{r}
+# create dataframe format
+pair <- as.data.frame(cbind(X,Y))
+# create function to estimate alpha
+alpha2 <- function(data, i){
+data <- data[i,]
+var.x <- var(data$X)
+var.y <- var(data$Y)
+cov.xy <- cov(data$X, data$Y)
+alpha <- (var.x - cov.xy) / (var.x + var.y - 2*cov.xy)
+return(alpha)
+}
+```
+
+```{r}
+# bootstrapping to estimate alpha by using boot library
+boot_alpha <- boot(data = pair, statistic = alpha2, R = 1000)
+# print the bootstrap results
+print(boot_alpha)
+```
+
+```{r}
+# plot histogram of estimated alpha
+hist(boot_alpha$t, main = "Histogram of Estimated Alpha from 1000 Bootstrap Samples",
+xlab = "Estimated Alpha")
+abline(v=boot_alpha$t0, col = "blue", lwd = 3, lty = 2)
+```
+
+The histogram illustrates the frequency distribution of estimated alpha values obtained from 1000 Bootstrap samples. The distribution exhibits a symmetrical shape, centered around the true population alpha of approximately 0.575, as indicated by the vertical blue-dashed line.
+
+CALCULATE THE BOOTSTRAP BIAS AND BOOTSTRAP CONFIDENCE INTERVAL
+
+```{r}
+# population alpha
+boot_alpha$t0
+# estimate standard deviation of alpha
+sd(boot_alpha$t)
+
+# bootstrap bias estimate
+bootstrap.bias = mean(boot_alpha$t) - boot_alpha$t0
+bootstrap.bias
+
+# 95 % CI of alpha
+boot.ci(boot.out=boot_alpha,conf=0.95, type="perc")
+
+```
+
+The estimated population alpha, derived from 1000 Bootstrap samples, centers around 0.575, as indicated by the vertical blue-dashed line in the histogram. The distribution of alpha exhibits a symmetrical shape, suggesting that the estimated values are evenly distributed around the true population alpha. Additionally, the standard deviation of alpha is estimated to be approximately 0.065.
+
+Upon calculating the bootstrap bias, we find it to be approximately 0.003, indicating a slight overestimation of the alpha parameter compared to the true population value.
+
+Furthermore, the 95% confidence interval for alpha, based on the bootstrap method, is computed to be (0.4554, 0.7003). This interval provides a range of values within which we can reasonably estimate the true population alpha with 95% confidence.
+
+# Question 5: Prostate cancer
+
+## a) Visualizing the data
+
+```{r}
+library(dplyr)
+# load prostate dataset
+prostate <- read.csv("prostate.csv")
+
+# View the structure of the dataset
+glimpse(prostate)
+
+# View the column names
+names(prostate)
+
+```
+
+The prostate dataset comprises 97 observations and features nine variables, including one response variable and eight predictors. The response variable, denoted as "lpsa," represents the logarithm of prostate-specific antigen (PSA) levels. The eight predictors are lcavol (log cancer volume), lweight (log prostate weight), age, lbph (log of benign prostatic hyperplasia amount), svi (seminal vesicle invasion), lcp (log of capsular penetration), gleason (Gleason score), and pgg45 (percentage of Gleason scores 4 or 5).
+
+```{r}
+# Create the scatterplot matrix
+pairs(prostate[,-1], col="blue")
+```
+
+This plot exhibits a grid of scatter pairplots representing various aspects of prostate cancer. In the first row, each scatter plot depicts the relationship between the response variable, lpsa, and one of the predictors. Notably, svi and gleason are categorical predictors included in the analysis.
+
+```{r}
+# Create a histogram of Log of PSA (lpsa)
+hist(prostate$lpsa, 
+     main = "Histogram of Log of PSA",
+     xlab = "Log of PSA",
+     ylab = "Frequency",
+     col = "skyblue",
+     border = "black")
+
+```
+
+This histogram illustrates a normal distribution of the response variable, lpsa, with a mean around 2.5. The minimum and maximum values of lpsa are approximately -1 and 6, respectively.
+
+## b) Ridge regression
+
+STEP i)
+
+```{r}
+# split the data into a matrix of predictor and a response vector (y)
+X <- prostate[, c("lcavol", "lweight", "age", "lbph", "svi", "lcp", "gleason", "pgg45")]
+y <- prostate[, "lpsa"]
+
+# standardized predictors
+X.stand<- scale(X, center = T, scale = T)
+# centered response
+y.centered <- y - mean(y)
+```
+
+STEP ii)
+
+```{r}
+# choose the first 65 patients as the training data, remaining as test data
+train.idx <- 1:65
+train.X <- X.stand[train.idx, ]
+train.y <- y.centered[train.idx]
+test.X <- X.stand[-train.idx, ]
+test.y <- y.centered[-train.idx]
+```
+
+STEP iii)
+
+```{r}
+# function to calculate ridge theta
+ridge <- function(X, y, lambda) {
+# calculate ridge regression coefficients
+lambda.diag <- lambda * diag(ncol(X))
+theta <- solve(t(X) %*% X + lambda.diag) %*% t(X) %*% y
+return(theta)
+}
+# set range of lambda
+lambda.seq <- 10^seq(-5,5, length = 100)
+# initialize an empty ridge regression coefficients matrix
+theta.matrix <- matrix(0, nrow = length(lambda.seq), ncol = ncol(train.X))
+# add column names to theta matrix
+colnames(theta.matrix) <- c("lcavol","lweight","age","lbph","svi","lcp","gleason","pgg45")
+# compute ridge regression coefficients for each lambda
+for (i in 1:length(lambda.seq)) {
+lambda <- lambda.seq[i]
+theta <- ridge(train.X, train.y, lambda)
+theta.matrix[i, ] <- theta
+}
+# pivot theta matrix for display
+result <- data.frame(cbind(lambda.seq, theta.matrix))
+result <- pivot_longer(result, names_to = "predictors", values_to = "theta", -lambda.seq)
+# plot the regularization path
+ggplot(result, aes(log10(lambda.seq), theta))+
+geom_line(aes(col=predictors), lwd = 1)+
+labs(title = "Ridge", x=expression(Log(lambda)), y = "theta")
+```
+
+STEP iv)
+
+```{r}
+# compute relative train errors for each value of theta and lambda
+train.error <- NULL
+for (i in 1:length(lambda.seq)) {
+# relative train error
+train.err <- sqrt((train.y- train.X %*% theta.matrix[i,])^2) / sqrt(train.y^2)
+train.error[i] <- train.err
+}
+# compute relative test errors for each value of theta and lambda
+test.error <- NULL
+for (i in 1:length(lambda.seq)) {
+# relative test error
+test.err <- sqrt((test.y - test.X %*% theta.matrix[i,])^2) / sqrt(test.y^2)
+test.error[i] <- test.err
+}
+# combine train test error and lambda in a dataframe for display
+train.test <- data.frame(cbind(lambda.seq, train.error, test.error))
+train.test <- pivot_longer(train.test, names_to = "error.type", values_to = "error", -lambda.seq)
+# plot train and test error
+ggplot(train.test, aes(log10(lambda.seq), error))+
+geom_line(aes(col=error.type), lwd = 1)+
+labs(title = "Relative error of the Ridge estimators by Lambda",
+x = expression(Log(lambda)), y = "||y-XB||2 / ||y||2")
+
+```
+
+```{r}
+# set number of CV folds
+k <- 10
+# create folds for CV
+set.seed(123)
+folds <- sample(rep(1:k, length.out = nrow(train.X)))
+# use 10 folds CV to choose optimal lambda
+mse.cv <- rep(0, length(lambda.seq))
+for (i in 1:length(lambda.seq)) {
+lambda <- lambda.seq[i]
+mse.fold <- rep(0, k)
+for (j in 1:k) {
+# train and validation split
+train.X.cv <- train.X[folds != j, ]
+train.y.cv <- train.y[folds != j]
+train.X.val <- train.X[folds == j, ]
+train.y.val <- train.y[folds == j]
+# compute ridge coefficients
+theta <- ridge(train.X.cv, train.y.cv, lambda)
+# compute predicted values for the validation set
+y.pred <- train.X.val %*% theta
+# calculate the MSE for the validation set
+mse.fold[j] <- mean((y.pred - train.y.val)^2)
+6}
+mse.cv[i] <- mean(mse.fold)
+}
+# choose lambda that minimizes the MSE
+lambda.optimal <- lambda.seq[which.min(mse.cv)]
+lambda.optimal
+```
+
+```{r}
+# Initialize an empty matrix to store ridge regression coefficients
+theta.matrix <- matrix(0, nrow = length(lambda.seq), ncol = ncol(train.X))
+
+# Compute ridge regression coefficients for each lambda
+for (i in 1:length(lambda.seq)) {
+  lambda <- lambda.seq[i]
+  
+  # Calculate ridge regression coefficients
+  theta <- ridge(train.X, train.y, lambda)
+  
+  # Store coefficients in theta.matrix
+  theta.matrix[i, ] <- theta
+}
+
+# Initialize vectors to store relative train and test errors
+train.error <- numeric(length(lambda.seq))
+test.error <- numeric(length(lambda.seq))
+
+# Compute relative train errors for each value of theta and lambda
+for (i in 1:length(lambda.seq)) {
+  # Relative train error
+  train.err <- sqrt(rowSums((train.y - train.X %*% theta.matrix[i,])^2)) / sqrt(sum(train.y^2))
+  train.error[i] <- mean(train.err)
+}
+
+# Compute relative test errors for each value of theta and lambda
+for (i in 1:length(lambda.seq)) {
+  # Relative test error
+  test.err <- sqrt(rowSums((test.y - test.X %*% theta.matrix[i,])^2)) / sqrt(sum(test.y^2))
+  test.error[i] <- mean(test.err)
+}
+
+# Combine train and test error and lambda in a dataframe for display
+train_test <- data.frame(lambda = lambda.seq, 
+                         train_error = train.error, 
+                         test_error = test.error)
+
+# Plot train and test error with lambda values marked
+ggplot(train_test, aes(log10(lambda))) +
+  geom_line(aes(y = train_error, color = "Train Error"), lwd = 1) +
+  geom_line(aes(y = test_error, color = "Test Error"), lwd = 1) +
+  annotate("text", x = log10(train_test$lambda)[which.min(train_test$train_error)], y = min(train_test$train_error), label = round(train_test$lambda[which.min(train_test$train_error)], 2), vjust = -0.5, color = "blue", size = 3) +
+  annotate("text", x = log10(train_test$lambda)[which.min(train_test$test_error)], y = min(train_test$test_error), label = round(train_test$lambda[which.min(train_test$test_error)], 2), vjust = -0.5, color = "red", size = 3) +
+  scale_color_manual(values = c("Train Error" = "blue", "Test Error" = "red")) +
+  labs(title = "Relative error of the Ridge estimators by Lambda",
+       x = expression(Log(lambda)),
+       y = "||y-XB||2 / ||y||2") +
+  theme_minimal()
+
+```
+
+STEP v)
+
+```{r}
+# compute the best theta
+theta <- ridge(train.X, train.y, lambda.optimal)
+# compute the train and test errors for each patient
+y.train.pred.ridge <- train.X %*% theta
+y.test.pred.ridge <- test.X %*% theta
+train.errors.ridge <- (train.y - y.train.pred.ridge)^2
+test.errors.ridge <- (test.y - y.test.pred.ridge)^2
+
+# Set the margin sizes
+par(mar = c(5, 4, 4, 2) + 0.1)
+# Plot train and test of actual and predicted lpsa by patient
+plot(1:length(train.y), train.y + mean(y), type = "l", lwd = 2, col = "black",
+     ylim = c(-1, 6), main = "Train - actual and predicted lpsa by patient",
+     xlab = "Patient number", ylab = "Log of PSA")
+lines(1:length(train.y), y.train.pred.ridge + mean(y), type = "l", lwd = 2, col = "red")
+legend("bottomright", cex = 0.6, c("Actual", "Predicted"), col = c("black", "red"), lwd = 2)
+
+# Set the margin sizes
+par(mar = c(5, 4, 4, 2) + 0.1)
+
+# Plot test - actual and predicted lpsa by patient
+plot(60 + 1:length(test.y), test.y + mean(y), type = "l", lwd = 2, col = "black",
+     ylim = c(-1, 6), main = "Test - actual and predicted lpsa by patient",
+     xlab = "Patient number", ylab = "Log of PSA")
+lines(60 + 1:length(test.y), y.test.pred.ridge + mean(y), type = "l", lwd = 2, col = "red")
+legend("bottomright", cex = 0.6, c("Actual", "Predicted"), col = c("black", "red"), lwd = 2)
+```
+
+## c) LASSO regression
+
+```{r}
+library(glmnet)
+# compute Lasso coefficients
+lasso.fit <- glmnet(train.X, train.y, alpha = 1, lambda = lambda.seq)
+# modify result to plot regularization path using ggplot
+lasso.beta <- as.matrix(t(lasso.fit$beta))
+row.names(lasso.beta) <- NULL
+lasso.lambda.seq <- log10(sort(lambda.seq, decreasing = T))
+lasso.result <- cbind(lasso.lambda.seq, lasso.beta)
+lasso.result <- pivot_longer(as.data.frame(lasso.result),
+names_to = "predictors", values_to = "beta", -lasso.lambda.seq)
+# plot the regularization path
+ggplot(lasso.result, aes(x=lasso.lambda.seq, y = beta))+
+geom_line(aes(col=predictors), lwd = 1)+
+theme_bw()+
+labs(title = "Lasso", x = expression(Log10(lambda)), y = "beta")
+```
+
+```{r}
+# compute train and test errors for each lambda value
+train.pred <- predict(lasso.fit, newx = train.X, s = lambda.seq)
+test.pred <- predict(lasso.fit, newx = test.X, s = lambda.seq)
+train.errors <- apply(train.pred, 2, function(x) sum((x - train.y)^2)/sum(train.y^2))
+test.errors <- apply(test.pred, 2, function(x) sum((x - test.y)^2)/sum(test.y^2))
+# combine train test error and lambda in a dataframe for display
+train.test <- data.frame(cbind(lambda.seq, train.errors, test.errors))
+train.test <- pivot_longer(train.test, names_to = "error.type", values_to = "error", -lambda.seq)
+# plot train and test error
+ggplot(train.test, aes(log10(lambda.seq), error))+
+geom_line(aes(col=error.type), lwd = 1)+
+labs(title = "Relative error of the Ridge estimators by Lambda",
+x = expression(Log(lambda)), y = "||y-XB||2 / ||y||2")
+```
+
+```{r}
+# choose optimal lambda using cross-validation
+cv.fit <- cv.glmnet(train.X, train.y, alpha = 1, lambda = lambda.seq, nfolds = 10)
+lambda.cv <- cv.fit$lambda.min
+cat("Selected lambda using cross-validation:", lambda.cv, "\n")
+```
+
+```{r}
+# Fit LASSO regression model
+lasso.fit <- glmnet(train.X, train.y, alpha = 1, lambda = lambda.seq)
+
+# Predict lpsa values for training and test datasets
+y.train.pred.lasso <- predict(lasso.fit, newx = train.X, s = lambda.cv)
+y.test.pred.lasso <- predict(lasso.fit, newx = test.X, s = lambda.cv)
+
+# Set the margin sizes
+par(mar = c(5, 4, 4, 2) + 0.1)
+
+# Plot train - actual and predicted lpsa by patient
+plot(1:length(train.y), train.y + mean(y), type = "l", lwd = 2, col = "black",
+     ylim = c(-1, 6), main = "Train - Actual and Predicted lpsa by Patient",
+     xlab = "Patient number", ylab = "Log of PSA", cex.lab = 1.2, cex.axis = 1.2)
+lines(1:length(train.y), y.train.pred.lasso + mean(y), type = "l", lwd = 2, col = "red")
+legend("topleft", cex = 0.8, c("Actual", "Predicted"), col = c("black", "red"), lwd = 2)
+
+# Plot test - actual and predicted lpsa by patient
+plot(60 + 1:length(test.y), test.y + mean(y), type = "l", lwd = 2, col = "black",
+     ylim = c(-1, 6), main = "Test - Actual and Predicted lpsa by Patient",
+     xlab = "Patient number", ylab = "Log of PSA", cex.lab = 1.2, cex.axis = 1.2)
+lines(60 + 1:length(test.y), y.test.pred.lasso + mean(y), type = "l", lwd = 2, col = "red")
+legend("topleft", cex = 0.8, c("Actual", "Predicted"), col = c("black", "red"), lwd = 2)
+
+```
+
+## d) Compare the results obtained from Ridge and Lasso regression
+```{r}
+# RIDGE
+# Compute Mean Squared Error (MSE) for train and test sets
+R_train_MSE <- mean(train.errors.ridge)
+R_test_MSE <- mean(test.errors.ridge)
+
+# Print MSE for train and test sets
+cat("Train MSE for Ridge:", R_train_MSE, "\n")
+cat("Test MSE for Ridge:", R_test_MSE, "\n")
+
+# LASSO
+# Compute Mean Squared Error (MSE) for train and test sets
+L_train_MSE <- mean(train.errors)
+L_test_MSE <- mean(test.errors)
+
+# Print MSE for train and test sets
+cat("Train MSE for LASSO:", L_train_MSE, "\n")
+cat("Test MSE for LASSO:", L_test_MSE, "\n")
+
+```
+
+
+| Method | Dataset | MSE       |
+|--------|---------|-----------|
+| Ridge  | Train   | 0.4040523 |
+| Ridge  | Test    | 0.6875485 |
+| Lasso  | Train   | 0.5005245 |
+| Lasso  | Test    | 1.519365  |
+
+Based on the results presented in the table, it's apparent that the training Mean Squared Error (MSE) of Lasso is slightly higher than that of Ridge. When it comes to the test MSE, Ridge significantly outperforms Lasso, with values of 0.69 and 1.52, respectively. This suggests that Ridge regression performs better on the Prostate cancer dataset. One potential reason for this could be that the dataset comprises only eight predictors, all with coefficients of roughly equal size. In such cases, Ridge regression tends to outperform Lasso, which might excel in datasets where some predictors have large coefficients and others have very small ones.
+
+During the analysis of the Prostate cancer dataset, it was observed that both Ridge and Lasso regression methods are highly sensitive to how predictor variables are standardized and how the response variable is centered. While the result graphs obtained in the assignment slightly differed from the expected graph, a more similar outcome could have been achieved by using only the first 50 samples as training data and the remaining samples as test data, and standardizing and centering the data based on the mean of the training dataset only.
+
+Furthermore, for predicting new data, it's crucial to standardize the new predictor variables using the same values used previously and add back the mean value of y (used to center the response variable) to return the response to its original scale. Additionally, testing models with and without intercept revealed that the model results are almost identical, thanks to the standardization process of variables.
+
+In conclusion, based on these observations, it can be inferred that the performance of Ridge and Lasso regression on the Prostate cancer dataset is influenced by factors such as the size and distribution of predictor coefficients, the standardization process, and the presence of an intercept in the model.
+
+# Question 6: Ridge estimate in multiple linear regression
+
+## a) Ridge regression estimate
+
+Objective function
+
+$$Q(\theta)=\Arrowvert y-X\theta\Arrowvert^{2}_{2} +\lambda\Arrowvert\theta\Arrowvert^{2}_{2} = (y-X\theta)^{T}(y-X\theta)+\lambda\theta^{T}\theta$$ Take the derivative: $$\frac{\partial Q}{\partial\theta}=-2X^{T}(y-X\theta)+2\lambda I\theta$$
+
+Set $\frac{\partial Q}{\partial\theta}=0\Rightarrow 2X^{T}X \theta +2\lambda I\theta =2X^{T}y$ $\Rightarrow(X^{T}X + \lambda I)\theta=X^{T}y$ $\Rightarrow\widehat{\theta}_{R}= (X^{T}X +\lambda I)^{-1}X^{T}y$ is the ridge regression estimate of $\theta$
+
+## b) Ridge estimate is not unbiased
+
+$$E(\widehat{\theta}_{R})=E[(X^{T}X +\lambda I)^{-1}X^{T}y]=(X^{T}X+\lambda I)^{-1}X^{T}E(y)=(X^{T}X+\lambda I)^{-1}X^{T}X\theta \neq \theta$$
+
+Hence $\widehat{\theta}_{R}$ is not an unbiased estimate of $\theta$
+
+## c) Bias, Variance and MSE of Ridge estimate
+
+-   Bias: $$Bias(\widehat{\theta}_{R})=E(\widehat{\theta}_{R})-\theta = (X^{T}X +\lambda I)^{-1}X^{T}X\theta - \theta = [(X^{T}X +\lambda I)^{-1}X^{T}X-I]\theta$$
+
+-   Variance: $$V(\widehat{\theta}_{R})=V[(X^{T}X +\lambda I)^{-1}X^{T}y] $$ $$ = (X^{T}X +\lambda I)^{-1}X^{T} . V(y) . [(X^{T}X +\lambda I)^{-1}X^{T}]^{T}$$ $$ = (X^{T}X +\lambda I)^{-1}X^{T} . \sigma^{2}I . [(X^{T}X +\lambda I)^{-1}X^{T}]^{T}$$
+
+    Let $W= (X^{T}X +\lambda I)^{-1}.X^{T}X\Rightarrow V(\widehat{\theta}_{R})=\sigma^{2}.W.(X^{T}X)^{-1}.W^{T}$
+
+-   MSE:
+
+$$ MSE(\widehat{\theta}_{R}) = V(\widehat{\theta}_{R}) + Bias^{2}(\widehat{\theta}_{R}) $$ $$ = \sigma^{2}.W.(X^{T}X)^{-1}.W^{T} + [(W - I)\theta]^{2} $$
+
+## d) Prediction
+
+$$
+\hat{Y}_{\text{new}} = X_{\text{new}}\hat{\theta}_{R} = X_{\text{new}}.(X^{T}X + \lambda I)^{-1}X^{T}Y
+$$
+
+$$
+Var(\hat{Y}_{\text{new}}) = Var(X_{\text{new}}\hat{\theta}_{R}) = X_{\text{new}}.Var(\hat{\theta}_{R}).X_{\text{new}}^{T}
+$$ $$ = X_{\text{new}}.\sigma^{2}.W.(X^{T}X)^{-1}.W^{T}.X_{\text{new}}^{T}$$ $$ = \sigma^{2}.(X_{\text{new}}W).(X^{T}X)^{-1}.(X_{\text{new}}W)^{T}$$
+
+# Question 7: Posterior distribution
+
+## i) Posterior distribution for a Poisson distribution
+
+**a) The prior distribution** of $\theta$ is Gamma (a,b), that is $$ \pi(\theta) = \frac{b^{a}.\theta^{a-1}.e^{-b\theta}}{\Gamma(a)}$$
+
+The Likelihood function $$L(y_{1},...y_{n}|\theta)=\frac{\prod_{i=1}^{n}\theta^{y_{i}}.e^{-\theta}}{y_{i}!}
+= \frac{\theta^{\sum_{i=1}^{n}y_{i}} \cdot e^{-n\theta}}{\prod_{i=1}^{n} y_{i}!}$$
+
+The posterior distribution of $\theta$ is $$\pi(\theta | y_{1}, \ldots, y_{n}) = \theta^{a + \sum_{i=1}^{n} y_{i} - 1} e^{-(b + n)\theta}$$
+
+Hence the unnormalized distribution of $\theta$ is $\Gamma(a+\sum_{i=1}^{n}y_{i}, b+n)$
+
+**b) The predictive distribution** is $$\pi(y_{new}|y_{1},...y_{n}) = \int_{0}^{\infty} \frac{\theta^{y_{new}}.e^{-\theta}}{y_{new}!}.\frac{(b+n)^{a+\sum_{i=1}^{n}y_{i}}.\theta^{a+\sum_{i=1}^{n}y_{i}-1}.e^{-(b+n)\theta}}{\Gamma(a+\sum_{i=1}^{n}y_{i})} d\theta$$
+
+which is Neg-Binomial ($a+n\bar{y} , \frac{n+b}{n+b+1}$) distribution. 
+
+## ii) The posterior distribution for a Beta distribution
+
+**a) The prior distribution** of $\theta$ is Beta(a,b), that is $$\pi(\theta) = \frac{\Gamma(a+b)}{\Gamma(a)\Gamma(b)}.\theta^{a-1}.(1-\theta)^{b-1}$$ The Likelihood function $L(y_{1}, \ldots, y_{n} | \theta) = \prod_{i=1}^{n} \theta^{y_{i}} (1-\theta)^{1-y_{i}} = \theta^{\sum_{i=1}^{n} y_{i}} (1-\theta)^{n-\sum_{i=1}^{n} y_{i}}$
+
+The posterior distribution of $\theta$ is $$\pi(\theta|y_{1},...y_{n}) = \theta^{a+\sum_{i=1}^{n} y_{i}-1}.(1-\theta)^{b+n-\sum_{i=1}^{n} y_{i}-1}$$ Hence, the unnormalized posterior distribution of $\theta$ is Beta $(a+\sum_{i=1}^{n} y_{i}, b+n-\sum_{i=1}^{n} y_{i})$
+
+**b) The predictive distribution** is $$\pi(y_{new}|y_{1},...y_{n}) = \int_{0}^{\infty} \theta^{y_{new}}.(1-\theta)^{1-y_{new}}.\frac{\Gamma(a+b+n)}{\Gamma(a+\sum_{i=1}^{n} y_{i}).\Gamma(b+n-\sum_{i=1}^{n} y_{i})}.\theta^{a+\sum_{i=1}^{n} y_{i}-1}.(1-\theta)^{b+n-\sum_{i=1}^{n} y_{i}-1}d\theta$$
+which is Beta-Binomial ($a+n\bar{y} , b + n - n\bar{y}$) distribution. 

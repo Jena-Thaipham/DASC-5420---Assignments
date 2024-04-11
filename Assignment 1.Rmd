@@ -1,0 +1,80 @@
+---
+title: "Assignment 1"
+author: "Pham Thi Thai - T00727094"
+date: "`r Sys.Date()`"
+output:
+  pdf_document: defaul
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r cache=TRUE}
+library(tidyverse)
+library(tinytex)
+
+```
+
+# 1. USARRESTS
+
+## (a) Construct box plots for each of the four variables and comment on the univariate characteristics of each briefly.
+
+```{r cache=TRUE}
+data("USArrests")
+
+# Create boxplots
+par(mfrow = c(2, 2), oma = c(0, 2, 2, 0), mar = c(4, 4, 2, 1))
+
+boxplot(USArrests$Murder, main = "Murder")
+boxplot(USArrests$Assault, main = "Assault")
+boxplot(USArrests$UrbanPop, main = "UrbanPop")
+boxplot(USArrests$Rape, main = "Rape")
+
+# Add an outer title
+title("Box Plots for USArrests Variables", outer = TRUE, line = 1)
+
+```
+
+```{r cache=TRUE}
+# Summary of univariate characteristics for each variable
+summary(USArrests$Murder)
+summary(USArrests$Assault)
+summary(USArrests$UrbanPop)
+summary(USArrests$Rape)
+```
+
+The "Murder" variable represents the rate of murder arrests per 100,000 individuals, providing insights into crime prevalence. Murder demonstrates a symmetric distribution centered around 7.250, with a range from 0.800 to 17.400 and no outliers. "Assault" indicates the rate of assault arrests per 100,000, shedding light on violent crime patterns. Assault exhibits a right-skewed distribution, centered at 159.0, with a range from 45.0 to 337.0 and no outliers. "UrbanPop" is the percentage of urban population, reflecting the urbanization level across states. UrbanPop displays near symmetry around 66.00, with a range of 32.00 to 91.00 and no outliers. Lastly, the "Rape" variable represents the rate of rape arrests per 100,000, offering an understanding of sexual assault occurrences. Rape is symmetric, centered at 20.10, with a range from 7.30 to 46.00, and there are some outliers.
+
+## (b) Obtain the sample mean vector X; the sample covariance matrix S and the sample correlation matrix R: What can you say about the relationship between the four variables?
+
+```{r cache=TRUE}
+# Extracting the relevant columns
+murder <- USArrests$Murder
+assault <- USArrests$Assault
+urbanPop <- USArrests$UrbanPop
+rape <- USArrests$Rape
+
+# Calculating the sample mean vector
+mean_vector <- colMeans(USArrests)
+cat("Sample Mean Vector (X):\n", mean_vector, "\n\n")
+
+# Calculating the sample covariance matrix
+cov_matrix <- cov(USArrests)
+cat("Sample Covariance Matrix (S):\n")
+print(cov_matrix)
+cat("\n")
+
+# Calculating the sample correlation matrix
+cor_matrix <- cor(USArrests)
+cat("Sample Correlation Matrix (R):\n")
+print(cor_matrix)
+
+```
+
+-   Murder and Assault have a strong positive correlation (0.8018733).
+-   Assault and Rape also show a strong positive correlation (0.6652412).
+-   Murder and Rape exhibit a moderate positive correlation (0.5635788).
+-   UrbanPop has weak correlations with the other variables.
+
+In summary, the relationships between these variables suggest notable associations, especially between Murder, Assault, and Rape, as indicated by their respective.
